@@ -1,0 +1,290 @@
+#!/usr/bin/env python3
+import tkinter as tk
+from tkinter import ttk, messagebox
+from decimal import Decimal, getcontext, ROUND_HALF_UP
+### thank you for using this software
+getcontext().prec = 12
+
+# ============================================================================
+# CALCULATION ENGINE
+# ============================================================================
+
+ABV_CONSTANT = Decimal('131.25')
+
+def gravity_to_abv(og, fg):
+    if og <= 0 or fg <= 0 or fg >= og:
+        return Decimal('0')
+    abv = (og - fg) * ABV_CONSTANT
+    return abv.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+
+def abv_to_og(target, fg):
+    if target <= 0:
+        return fg
+    og = (target / ABV_CONSTANT) + fg
+    return og.quantize(Decimal('0.003'), rounding=ROUND_HALF_UP)
+
+def abv_to_fg(og, target):
+    if target <= 0:
+        return og
+    fg = og - (target / ABV_CONSTANT)
+    if fg < Decimal('0.990'):
+        fg = Decimal('0.990')
+    return fg.quantize(Decimal('0.003'), rounding=ROUND_HALF_UP)
+
+# ============================================================================
+# PRESETS
+# ============================================================================
+
+PRESETS = {
+    "Well / City Water": {"og": "1.000", "fg": "1.000", "note": "No sugars"},
+    "Light Beer": {"og": "1.035", "fg": "1.006", "note": "3.8% ABV expected"},
+    "Standard Lager": {"og": "1.045", "fg": "1.008", "note": "4.9% ABV expected"},
+    "Standard Ale": {"og": "1.050", "fg": "1.010", "note": "5.3% ABV expected"},
+    "IPA": {"og": "1.060", "fg": "1.012", "note": "6.3% ABV expected"},
+    "Imperial Stout": {"og": "1.090", "fg": "1.020", "note": "9.2% ABV expected"},
+    "Mead": {"og": "1.100", "fg": "1.010", "note": "11.8% ABV expected"},
+    "Sugar Wash": {"og": "1.070", "fg": "0.998", "note": "9.5% ABV expected"}
+}
+
+# ============================================================================
+# MAIN APPLICATION
+# ============================================================================
+
+class BeerCalcApp(tk.Tk):
+    def __init__(self):
+        super().__init__()
+        
+        # Window setup
+        self.title("Alc")
+        self.geometry("460x700")
+        self.minsize(400, 600)
+        self.configure(bg="#F2F2F6")
+        
+        # Create UI
+        self.create_widgets()
+        
+        # Center window
+        self.update_idletasks()
+        x = (self.winfo_screenwidth() // 2) - (self.winfo_width() // 2)
+        y = (self.winfo_screenheight() // 2) - (self.winfo_height() // 2)
+        self.geometry(f"+{x}+{y}")
+    
+    def create_widgets(self):
+        # Title
+        title = tk.Label(self, text="Alc", font=("Helvetica", 24, "bold"), bg="#F2F2F6", fg="#000000")
+        title.pack(pady=(20, 10))
+        
+        subtitle = tk.Label(self, text="cheers    ~~~ from the Alc Team", font=("Helvetica", 12), bg="#F2F2F6", fg="#000000")
+        subtitle.pack(pady=(0, 20))
+        
+        subtitle = tk.Label(self, text="(ie muwah)",     font=("Helvetica", 12), bg="#F2F2F6", fg="#000000")
+        subtitle.pack(pady=(0, 20))
+
+        # Create scrollable frame
+        canvas = tk.Canvas(self, bg="#F2F2F6", highlightthickness=0)
+        scrollbar = tk.Scrollbar(self, orient="vertical", command=canvas.yview)
+        self.scroll_frame = tk.Frame(canvas, bg="#F2F2F6")
+        
+        self.scroll_frame.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.create_window((0, 0), window=self.scroll_frame, anchor="nw", width=440)
+        canvas.configure(yscrollcommand=scrollbar.set)
+        
+        canvas.pack(side="left", fill="both", expand=True, padx=(10, 0))
+        scrollbar.pack(side="right", fill="y", padx=(0, 10))
+        
+        # Mouse wheel support
+        def on_mousewheel(event):
+            canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+        canvas.bind("<MouseWheel>", on_mousewheel)
+        
+        # Build sections
+        self.build_section_abv()
+        self.build_section_reverse()
+        self.build_section_presets()
+        
+        # Footer
+        footer = tk.Label(self.scroll_frame, text="ABV = (OG - FG) × 131.25", font=("Helvetica", 10), bg="#F2F2F6", fg="#888888")
+        footer.pack(pady=20)
+    
+    def create_card(self, parent, title):
+        """Create a rounded white card"""
+        card = tk.Frame(parent, bg="#FFFFFF", relief="flat", bd=0)
+        card.pack(fill="x", pady=10, padx=5)
+        
+        # Add a subtle border
+        card.configure(highlightbackground="#E5E5EA", highlightthickness=1, highlightcolor="#E5E5EA")
+        
+        inner = tk.Frame(card, bg="#FFFFFF")
+        inner.pack(fill="x", padx=20, pady=15)
+        
+        # Card title
+        tk.Label(inner, text=title, font=("Helvetica", 16, "bold"), bg="#FFFFFF", fg="#000000").pack(anchor="w", pady=(0, 12))
+        
+        return inner
+    
+    def create_entry_row(self, parent, label, default):
+        """Create a labeled entry row"""
+        frame = tk.Frame(parent, bg="#FFFFFF")
+        frame.pack(fill="x", pady=8)
+        
+        tk.Label(frame, text=label, font=("Helvetica", 13), bg="#FFFFFF", fg="#000000").pack(anchor="w")
+        
+        entry = tk.Entry(frame, font=("Helvetica", 14), bg="#F2F2F6", fg="#000000",
+                         bd=0, highlightthickness=1, highlightcolor="#007AFF", highlightbackground="#E5E5EA")
+        entry.pack(fill="x", pady=(5, 0), ipady=8)
+        entry.insert(0, default)
+        
+        return entry
+    
+    def create_button(self, parent, text, command, color):
+        """Create a rounded button"""
+        btn = tk.Button(parent, text=text, command=command,
+                        font=("Helvetica", 13, "bold"),
+                        bg=color, fg="#FFFFFF", bd=0, relief="flat",
+                        cursor="hand2", padx=20, pady=10)
+        btn.pack(fill="x", pady=15)
+        return btn
+    
+    def build_section_abv(self):
+        """Section 1: Calculate ABV from OG and FG"""
+        card = self.create_card(self.scroll_frame, "Hydrometer Reading")
+        
+        self.og_entry = self.create_entry_row(card, "Original Gravity (OG)", "1.050")
+        self.fg_entry = self.create_entry_row(card, "Final Gravity (FG)", "1.010")
+        
+        self.abv_label = tk.Label(card, text="0.00%", font=("Helvetica", 32, "bold"), bg="#FFFFFF", fg="#007AFF")
+        self.abv_label.pack(pady=15)
+        
+        self.create_button(card, "Calculate ABV", self.calc_abv, "#007AFF")
+    
+    def build_section_reverse(self):
+        """Section 2: Find OG or FG from target ABV"""
+        card = self.create_card(self.scroll_frame, "Target ABV")
+        
+        self.target_entry = self.create_entry_row(card, "Target ABV (%)", "5.0")
+        
+        # Mode selection
+        mode_frame = tk.Frame(card, bg="#FFFFFF")
+        mode_frame.pack(fill="x", pady=10)
+        
+        self.mode_var = tk.StringVar(value="og")
+        
+        tk.Radiobutton(mode_frame, text="Find Original Gravity (OG)", variable=self.mode_var, value="og",
+                      bg="#FFFFFF", font=("Helvetica", 11), selectcolor="#FFFFFF").pack(anchor="w")
+        tk.Radiobutton(mode_frame, text="Find Final Gravity (FG)", variable=self.mode_var, value="fg",
+                      bg="#FFFFFF", font=("Helvetica", 11), selectcolor="#FFFFFF").pack(anchor="w")
+        
+        # Known value entry
+        self.known_label = tk.Label(card, text="Final Gravity (FG)", font=("Helvetica", 13), bg="#FFFFFF", fg="#000000")
+        self.known_label.pack(anchor="w", pady=(15, 5))
+        
+        self.known_entry = tk.Entry(card, font=("Helvetica", 14), bg="#F2F2F6", fg="#000000",
+                                     bd=0, highlightthickness=1, highlightcolor="#007AFF", highlightbackground="#E5E5EA")
+        self.known_entry.pack(fill="x", pady=(0, 5), ipady=8)
+        self.known_entry.insert(0, "1.010")
+        
+        self.reverse_result = tk.Label(card, text="---", font=("Helvetica", 24, "bold"), bg="#FFFFFF", fg="#34C759")
+        self.reverse_result.pack(pady=15)
+        
+        self.create_button(card, "Calculate", self.calc_reverse, "#34C759")
+        
+        # Update label when mode changes
+        def update_mode_label(*args):
+            if self.mode_var.get() == "og":
+                self.known_label.config(text="Final Gravity (FG)")
+                self.known_entry.delete(0, tk.END)
+                self.known_entry.insert(0, "1.010")
+            else:
+                self.known_label.config(text="Original Gravity (OG)")
+                self.known_entry.delete(0, tk.END)
+                self.known_entry.insert(0, "1.050")
+        
+        self.mode_var.trace_add("write", update_mode_label)
+    
+    def build_section_presets(self):
+        """Section 3: Quick presets"""
+        card = self.create_card(self.scroll_frame, "Quick Presets")
+        
+        # Preset dropdown
+        self.preset_var = tk.StringVar(value="Select a style...")
+        preset_dropdown = ttk.Combobox(card, textvariable=self.preset_var,
+                                        values=list(PRESETS.keys()),
+                                        state="readonly", font=("Helvetica", 12))
+        preset_dropdown.pack(fill="x", pady=(0, 10), ipady=5)
+        preset_dropdown.bind("<<ComboboxSelected>>", self.on_preset)
+        
+        # Custom entries
+        self.custom_og = self.create_entry_row(card, "Custom OG", "1.050")
+        self.custom_fg = self.create_entry_row(card, "Custom FG", "1.010")
+        
+        self.custom_result = tk.Label(card, text="---", font=("Helvetica", 28, "bold"), bg="#FFFFFF", fg="#FF9F0A")
+        self.custom_result.pack(pady=15)
+        
+        self.create_button(card, "Estimate ABV", self.calc_custom, "#FF9F0A")
+        
+        self.preset_note = tk.Label(card, text="", font=("Helvetica", 10, "italic"), bg="#FFFFFF", fg="#888888")
+        self.preset_note.pack(pady=(0, 5))
+    
+    def on_preset(self, event):
+        selected = self.preset_var.get()
+        if selected in PRESETS:
+            data = PRESETS[selected]
+            self.custom_og.delete(0, tk.END)
+            self.custom_og.insert(0, data["og"])
+            self.custom_fg.delete(0, tk.END)
+            self.custom_fg.insert(0, data["fg"])
+            self.preset_note.config(text=data["note"])
+    
+    def get_decimal(self, entry, name):
+        try:
+            return Decimal(entry.get().strip())
+        except:
+            raise ValueError(f"Invalid {name}")
+    
+    def calc_abv(self):
+        try:
+            og = self.get_decimal(self.og_entry, "OG")
+            fg = self.get_decimal(self.fg_entry, "FG")
+            
+            if fg >= og:
+                raise ValueError("FG must be less than OG")
+            
+            abv = gravity_to_abv(og, fg)
+            self.abv_label.config(text=f"{abv:.2f}%")
+        except Exception as e:
+            messagebox.showerror("Error", str(e))
+    
+    def calc_reverse(self):
+        try:
+            target = self.get_decimal(self.target_entry, "ABV")
+            if target < 0 or target > 25:
+                raise ValueError("ABV must be between 0 and 25")
+            
+            known = self.get_decimal(self.known_entry, "gravity")
+            
+            if self.mode_var.get() == "og":
+                result = abv_to_og(target, known)
+                self.reverse_result.config(text=f"OG = {result:.3f}")
+            else:
+                result = abv_to_fg(known, target)
+                self.reverse_result.config(text=f"FG = {result:.3f}")
+        except Exception as e:
+            messagebox.showerror("Error", str(e))
+    
+    def calc_custom(self):
+        try:
+            og = self.get_decimal(self.custom_og, "OG")
+            fg = self.get_decimal(self.custom_fg, "FG")
+            
+            if fg >= og:
+                raise ValueError("FG must be less than OG")
+            
+            abv = gravity_to_abv(og, fg)
+            self.custom_result.config(text=f"{abv:.2f}%")
+        except Exception as e:
+            messagebox.showerror("Error", str(e))
+
+
+if __name__ == "__main__":
+    app = BeerCalcApp()
+    app.mainloop()
